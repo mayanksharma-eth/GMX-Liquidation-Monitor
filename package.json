@@ -1,0 +1,24 @@
+{
+  "name": "gmx-liquidation-monitor",
+  "version": "1.0.0",
+  "description": "GMX Risk & Liquidation Monitor MVP",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm start"
+  },
+  "keywords": [
+    "gmx",
+    "defi",
+    "liquidation",
+    "arbitrum",
+    "risk-monitoring"
+  ],
+  "author": "",
+  "license": "MIT"
+}

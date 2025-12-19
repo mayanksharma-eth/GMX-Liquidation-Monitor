@@ -1,0 +1,24 @@
+{
+  "name": "gmx-monitor-backend",
+  "version": "1.0.0",
+  "description": "GMX Risk & Liquidation Monitor Backend",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "fastify": "^4.25.2",
+    "@fastify/cors": "^8.5.0",
+    "ethers": "^6.9.2",
+    "dotenv": "^16.3.1",
+    "zod": "^3.22.4",
+    "p-limit": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.0"
+  }
+}

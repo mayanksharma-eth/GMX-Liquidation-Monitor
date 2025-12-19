@@ -1,0 +1,287 @@
+# GMX Risk & Liquidation Monitor (MVP)
+
+A minimal system for monitoring GMX v1 positions and their liquidation risk on Arbitrum.
+
+## Features
+
+- Fetches open GMX positions for any wallet address
+- Computes liquidation distance metrics per position
+- Risk classification (SAFE / WARNING / CRITICAL)
+- REST API backend with Fastify
+- Clean Next.js dashboard UI
+- In-memory cache (15s TTL) to avoid RPC spam
+
+## Architecture
+
+```
+GMX_Liquidation_Monitor/
+├── backend/               # Fastify + ethers v6
+│   ├── src/
+│   │   ├── controllers/   # API endpoint handlers
+│   │   ├── services/      # GMX position fetching + risk logic
+│   │   ├── utils/         # Contracts, cache, validation
+│   │   ├── types/         # TypeScript interfaces
+│   │   └── server.ts      # Entry point
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── frontend/              # Next.js 14 App Router
+│   ├── app/
+│   │   ├── page.tsx       # Main dashboard
+│   │   ├── layout.tsx
+│   │   └── globals.css
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── .env.example
+└── readme.md
+```
+
+## Tech Stack
+
+- **Backend**: Node.js, Fastify, ethers v6, TypeScript
+- **Frontend**: Next.js 14 (App Router), React, TypeScript
+- **Chain**: Arbitrum (GMX v1)
+- **No database** - in-memory cache only
+
+## Prerequisites
+
+- Node.js 18+ and npm/yarn/pnpm
+- Arbitrum RPC URL (public or private like Alchemy/Infura)
+
+## Setup Instructions
+
+### 1. Clone and Configure
+
+```bash
+# Navigate to project directory
+cd GMX_Liquidation_Monitor
+
+# Copy environment variables
+cp .env.example .env
+
+# Edit .env and add your Arbitrum RPC URL
+# ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc  (public)
+# or use your own: https://arb-mainnet.g.alchemy.com/v2/YOUR_KEY
+```
+
+### 2. Backend Setup
+
+```bash
+cd backend
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Backend will run at `http://localhost:3001`
+
+### 3. Frontend Setup
+
+Open a new terminal:
+
+```bash
+cd frontend
+
+# Create frontend environment file
+cp .env.local.example .env.local
+
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+```
+
+Frontend will run at `http://localhost:3000`
+
+### 4. Test the Application
+
+1. Open browser to `http://localhost:3000`
+2. Enter a wallet address with GMX positions (or use test address)
+3. Click "Check Positions" to see liquidation risk
+
+## API Endpoints
+
+### `GET /health`
+Health check endpoint.
+
+**Response:**
+```json
+{ "ok": true }
+```
+
+### `GET /positions?account=0x...`
+Fetch positions for a wallet address.
+
+**Response:**
+```json
+[
+  {
+    "market": "ETH-USD",
+    "isLong": true,
+    "sizeUsd": 10000,
+    "collateralUsd": 2000,
+    "entryPrice": 3500,
+    "markPrice": 3400,
+    "liquidationPrice": 3200,
+    "liqDistancePct": 5.88
+  }
+]
+```
+
+### `GET /risk?account=0x...`
+Fetch positions with risk assessment.
+
+**Response:**
+```json
+[
+  {
+    "market": "ETH-USD",
+    "isLong": true,
+    "sizeUsd": 10000,
+    "collateralUsd": 2000,
+    "entryPrice": 3500,
+    "markPrice": 3400,
+    "liquidationPrice": 3200,
+    "liqDistancePct": 5.88,
+    "riskLevel": "WARNING",
+    "riskExplanation": "WARNING: liquidates if ETH drops ~5.88%"
+  }
+]
+```
+
+## Implementation Details
+
+### Position Fetching (Option A - On-Chain)
+
+This implementation uses **Option A**: Direct on-chain reads via ethers v6.
+
+**Contracts used:**
+- Vault: `0x489ee077994B6658eAfA855C308275EAd8097C4A`
+- Reader: `0x22199a49A999c351eF7927602CFB187ec3cae489`
+
+**Markets checked:** ETH-USD, BTC-USD (both long and short positions)
+
+The system:
+1. Calls `Vault.getPosition()` for each market/side combination
+2. Fetches current mark prices via `getMinPrice()`/`getMaxPrice()`
+3. Calculates liquidation metrics
+
+### Liquidation Calculation (Simplified GMX v1 Logic)
+
+**Formula:**
+```
+For LONG:
+  liquidationPrice = entryPrice - (remainingCollateral / leverage)
+
+For SHORT:
+  liquidationPrice = entryPrice + (remainingCollateral / leverage)
+
+Where:
+  leverage = sizeUsd / collateralUsd
+  remainingCollateral = collateralUsd - liquidationFee
+  liquidationFee = max($5, 0.5% of collateral)
+```
+
+**Assumptions:**
+- Liquidation fee: ~$5 or 0.5% of collateral
+- Funding fees are **ignored** (would require historical tracking)
+- Margin fees are already reflected in collateral
+
+This is an approximation. The exact GMX v1 formula includes:
+- Dynamic funding rate accumulation
+- Precise fee calculations from contract state
+- Position reserve amounts
+
+### Risk Classification
+
+- **SAFE**: `liqDistancePct >= 15%`
+- **WARNING**: `7% <= liqDistancePct < 15%`
+- **CRITICAL**: `liqDistancePct < 7%`
+
+### Caching
+
+- TTL: 15 seconds
+- Separate caches for `/positions` and `/risk` endpoints
+- Keyed by normalized wallet address
+
+## Environment Variables
+
+### Backend (`.env`)
+```bash
+ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc  # Required
+PORT=3001                                       # Optional
+```
+
+### Frontend (`frontend/.env.local`)
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:3001
+```
+
+## Production Build
+
+### Backend
+```bash
+cd backend
+npm run build
+npm start
+```
+
+### Frontend
+```bash
+cd frontend
+npm run build
+npm start
+```
+
+## Upgrading to Full On-Chain Implementation
+
+Current implementation already uses on-chain reads, but can be enhanced:
+
+1. **Add more markets**: Extend `MARKET_TOKENS` in [backend/src/utils/contracts.ts](backend/src/utils/contracts.ts#L36)
+2. **Precise liquidation fees**: Read from `Vault.liquidationFeeUsd()` instead of approximation
+3. **Funding rates**: Track funding rate accumulation over time (requires historical data)
+4. **Multiple collateral types**: Check positions with ETH/BTC collateral, not just USDC
+5. **GMX v2 support**: Implement adapter for GMX v2 contracts on Arbitrum
+
+## Limitations (MVP)
+
+- Only checks USDC-collateralized positions
+- Funding fees not included in liquidation calculation
+- No historical position tracking
+- No alerts/notifications
+- No PnL calculations
+- Public RPC may be rate-limited (use private RPC for production)
+
+## Troubleshooting
+
+**"Failed to fetch positions":**
+- Check RPC URL is valid and accessible
+- Verify wallet address format (must start with 0x)
+- Public RPCs may have rate limits - try private RPC
+
+**No positions found:**
+- Wallet may not have open GMX v1 positions on Arbitrum
+- Only checks ETH-USD and BTC-USD markets
+- Only checks USDC collateral positions
+
+**CORS errors:**
+- Backend must be running on port 3001
+- Frontend must be running on port 3000
+- Check `NEXT_PUBLIC_API_URL` in frontend/.env.local
+
+## Testing with Real Positions
+
+To test, you need a wallet address that has active GMX v1 positions on Arbitrum. If you don't have one:
+
+1. Visit [GMX v1](https://app.gmx.io) (legacy)
+2. Create a small test position
+3. Use that wallet address in the monitor
+
+## License
+
+MIT
