@@ -2,10 +2,12 @@ import { createHmac } from 'crypto';
 import {
   CopinTopTradersResponseSchema,
   CopinPositionsResponseSchema,
+  CopinTraderStatisticsResponseSchema,
   GetTopTradersParams,
   GetTraderPositionsParams,
   CopinTrader,
   CopinPosition,
+  CopinTraderStatistic,
 } from '../types/copin.types';
 
 /**
@@ -44,42 +46,116 @@ export class CopinClient {
   }
 
   /**
-   * Fetch top traders leaderboard
-   * Uses GET /leaderboards/page
+   * Fetch top traders leaderboard with automatic fallback
+   * Tries /leaderboards/page first, falls back to /position/statistic/filter if empty
    */
   async getTopTraders(params: GetTopTradersParams): Promise<CopinTrader[]> {
-    // Map timeframe to Copin's statisticType enum
-    let statisticType = 'WEEK';
-    if (params.timeframe === '30d' || params.timeframe === '90d') {
-      statisticType = 'MONTH';
+    // Try leaderboard first (snapshot-based)
+    const leaderboardTraders = await this.getTopTradersFromLeaderboard(params);
+
+    if (leaderboardTraders.length > 0) {
+      console.log(`Found ${leaderboardTraders.length} traders from leaderboard`);
+      return leaderboardTraders;
     }
 
-    const queryParams = new URLSearchParams({
-      protocol: params.protocol,
-      queryDate: Date.now().toString(),
-      statisticType: statisticType,
-      limit: params.limit.toString(),
-      offset: '0',
-      sort_by: 'ranking',
-      sort_type: 'asc',
-    });
+    // Fallback to statistics filter (more reliable for active traders)
+    console.log(`📊 Leaderboard empty for ${params.protocol}, trying statistics filter...`);
+    const statisticsTraders = await this.getTopTradersFromStatistics(params);
 
-    const url = `${this.baseUrl}${ENDPOINTS.LEADERBOARDS}?${queryParams}`;
-    const response = await this.fetchWithRetry(url, 'GET');
+    if (statisticsTraders.length > 0) {
+      console.log(`✅ Found ${statisticsTraders.length} traders from statistics`);
+    } else {
+      console.log(`ℹ️  No trader data available for ${params.protocol} (${params.timeframe})`);
+    }
 
-    // Try to validate, but be flexible if structure differs
+    return statisticsTraders;
+  }
+
+  /**
+   * Fetch top traders from leaderboard snapshot
+   * Uses GET /leaderboards/page
+   */
+  private async getTopTradersFromLeaderboard(params: GetTopTradersParams): Promise<CopinTrader[]> {
     try {
+      // Map timeframe to Copin's statisticType enum
+      let statisticType = 'WEEK';
+      if (params.timeframe === '30d' || params.timeframe === '90d') {
+        statisticType = 'MONTH';
+      }
+
+      const queryParams = new URLSearchParams({
+        protocol: params.protocol,
+        queryDate: Date.now().toString(),
+        statisticType: statisticType,
+        limit: params.limit.toString(),
+        offset: '0',
+        sort_by: 'ranking',
+        sort_type: 'asc',
+      });
+
+      const url = `${this.baseUrl}${ENDPOINTS.LEADERBOARDS}?${queryParams}`;
+      const response = await this.fetchWithRetry(url, 'GET');
+
       const parsed = CopinTopTradersResponseSchema.parse(response);
       return parsed.data;
     } catch (e) {
-      // If validation fails, try to extract data directly
-      console.warn('Copin response structure differs from expected, adapting...');
-      if (Array.isArray(response)) {
-        return response;
+      console.warn('Leaderboard fetch failed:', e instanceof Error ? e.message : 'Unknown error');
+      return [];
+    }
+  }
+
+  /**
+   * Fetch top traders from statistics filter (more reliable)
+   * Uses POST /public/:PROTOCOL/position/statistic/filter
+   */
+  private async getTopTradersFromStatistics(params: GetTopTradersParams): Promise<CopinTrader[]> {
+    try {
+      // Map timeframe to Copin's type enum
+      let typeValue = 'D7';
+      if (params.timeframe === '30d') {
+        typeValue = 'D30';
+      } else if (params.timeframe === '90d') {
+        typeValue = 'D90';
       }
-      if (response.data && Array.isArray(response.data)) {
-        return response.data;
-      }
+
+      // Replace :PROTOCOL in endpoint path
+      const protocol = params.protocol.toUpperCase(); // Keep as-is: GMX or GMX_V2
+      const endpoint = ENDPOINTS.TRADER_STATS.replace(':PROTOCOL', protocol);
+      const url = `${this.baseUrl}${endpoint}`;
+
+      const requestBody = {
+        pagination: {
+          limit: params.limit,
+          offset: 0,
+        },
+        queries: [
+          { fieldName: 'type', value: typeValue }
+        ],
+        ranges: [
+          { fieldName: 'totalTrade', gte: 1 }, // At least 1 trade
+        ],
+        sortBy: 'totalVolume',
+        sortType: 'desc',
+      };
+
+      const response = await this.fetchWithRetry(url, 'POST', requestBody);
+      const parsed = CopinTraderStatisticsResponseSchema.parse(response);
+
+      // Convert CopinTraderStatistic to CopinTrader format
+      return parsed.data.map((stat: CopinTraderStatistic) => ({
+        address: stat.account,
+        rank: 0, // No rank in statistics
+        volumeUsd: stat.totalVolume,
+        pnlUsd: stat.realisedPnl,
+        winRate: stat.totalWin && stat.totalTrade
+          ? (stat.totalWin / stat.totalTrade) * 100
+          : undefined,
+        totalTrade: stat.totalTrade,
+        totalWin: stat.totalWin,
+        totalLoss: stat.totalLose,
+      }));
+    } catch (e) {
+      console.warn('Statistics filter fetch failed:', e instanceof Error ? e.message : 'Unknown error');
       return [];
     }
   }

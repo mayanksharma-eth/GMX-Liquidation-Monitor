@@ -7,8 +7,9 @@ A comprehensive system for monitoring GMX position liquidation risk on Arbitrum,
 
 ## Features
 
+
 ### Core Features
-- Fetches open GMX positions for any wallet address (on-chain)
+- Fetches open GMX positions for any wallet address  (on-chain)
 - Monitors top GMX traders (whales) via Copin Analyzer
 - Computes liquidation distance metrics per position
 - Risk classification (SAFE / WARNING / CRITICAL)

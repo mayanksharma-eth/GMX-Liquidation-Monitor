@@ -62,11 +62,37 @@ export const CopinPositionsResponseSchema = z.object({
   }).optional(),
 });
 
+// Trader Statistics Schema (for /position/statistic/filter)
+export const CopinTraderStatisticSchema = z.object({
+  account: z.string(),
+  type: z.string(), // D7, D30, etc.
+  totalVolume: z.number().optional(),
+  totalTrade: z.number().optional(),
+  totalWin: z.number().optional(),
+  totalLose: z.number().optional(),
+  totalLiquidation: z.number().optional(),
+  realisedPnl: z.number().optional(),
+  avgRoi: z.number().optional(),
+  maxRoi: z.number().optional(),
+  lastTradeAtTs: z.number().optional(),
+});
+
+export const CopinTraderStatisticsResponseSchema = z.object({
+  data: z.array(CopinTraderStatisticSchema),
+  meta: z.object({
+    total: z.number().optional(),
+    limit: z.number().optional(),
+    offset: z.number().optional(),
+  }).optional(),
+});
+
 // Inferred TypeScript types
 export type CopinTrader = z.infer<typeof CopinTraderSchema>;
 export type CopinPosition = z.infer<typeof CopinPositionSchema>;
+export type CopinTraderStatistic = z.infer<typeof CopinTraderStatisticSchema>;
 export type CopinTopTradersResponse = z.infer<typeof CopinTopTradersResponseSchema>;
 export type CopinPositionsResponse = z.infer<typeof CopinPositionsResponseSchema>;
+export type CopinTraderStatisticsResponse = z.infer<typeof CopinTraderStatisticsResponseSchema>;
 
 // Request parameter types
 export interface GetTopTradersParams {
