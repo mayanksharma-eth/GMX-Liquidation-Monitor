@@ -84,6 +84,12 @@ export class CopinGMXSource implements PositionSource {
         return null;
       }
 
+      const leverage = typeof copinPos.leverage === 'number'
+        ? copinPos.leverage
+        : collateralUsd > 0
+          ? sizeUsd / collateralUsd
+          : 0;
+
       // Get liquidation price - prefer Copin's value if available
       let liquidationPrice: number;
       if (copinPos.liquidationPrice && copinPos.liquidationPrice > 0) {
@@ -111,6 +117,7 @@ export class CopinGMXSource implements PositionSource {
         isLong,
         sizeUsd,
         collateralUsd,
+        leverage,
         entryPrice,
         markPrice,
         liquidationPrice,
@@ -137,7 +144,15 @@ export class CopinGMXSource implements PositionSource {
     entryPrice: number,
     isLong: boolean
   ): number {
+    if (collateralUsd <= 0 || sizeUsd <= 0) {
+      return entryPrice;
+    }
+
     const leverage = sizeUsd / collateralUsd;
+    if (!isFinite(leverage) || leverage <= 0) {
+      return entryPrice;
+    }
+
     const liquidationFeeUsd = Math.max(5, collateralUsd * 0.005);
     const remainingCollateral = collateralUsd - liquidationFeeUsd;
 
@@ -157,6 +172,10 @@ export class CopinGMXSource implements PositionSource {
     liquidationPrice: number,
     isLong: boolean
   ): number {
+    if (markPrice <= 0) {
+      return 0;
+    }
+
     const distance = Math.abs(markPrice - liquidationPrice);
     const pct = (distance / markPrice) * 100;
     return Math.round(pct * 100) / 100; // Round to 2 decimals

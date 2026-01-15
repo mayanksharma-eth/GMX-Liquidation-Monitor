@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import dotenv from 'dotenv';
 import { PositionsController } from './controllers/positions.controller';
 import { WhalesController } from './controllers/whales.controller';
+import { StatusController } from './controllers/status.controller';
 import { CopinClient } from './clients/copin.client';
 
 // Load environment variables
@@ -42,14 +43,21 @@ const copinClient = new CopinClient({
   apiSecret: COPIN_API_SECRET,
   maxRetries: 2,
   retryDelay: 1000,
+  defaultChain: COPIN_CHAIN,
 });
 const whalesController = new WhalesController(copinClient, COPIN_CHAIN);
+const statusController = new StatusController(RPC_URL, copinClient, COPIN_CHAIN);
 
 // Routes
 
 // Health check
 fastify.get('/health', async (request, reply) => {
   return { ok: true };
+});
+
+// Extended status (RPC + Copin)
+fastify.get('/status', async (request, reply) => {
+  return statusController.getStatus(request as any, reply);
 });
 
 // Original endpoints (on-chain)
@@ -59,6 +67,10 @@ fastify.get('/positions', async (request, reply) => {
 
 fastify.get('/risk', async (request, reply) => {
   return positionsController.getRisk(request as any, reply);
+});
+
+fastify.get('/risk/overview', async (request, reply) => {
+  return positionsController.getRiskOverview(request as any, reply);
 });
 
 // Whale monitoring endpoints (Copin-based)
@@ -80,10 +92,14 @@ const start = async () => {
   Original (on-chain):
     - GET /positions?account=0x...
     - GET /risk?account=0x...
+    - GET /risk/overview?account=0x...
 
   Whale Monitoring (Copin):
     - GET /top-traders?timeframe=7d&limit=25&protocol=GMX
-    - GET /whales/risk?timeframe=7d&limit=25&protocol=GMX\n`);
+    - GET /whales/risk?timeframe=7d&limit=25&protocol=GMX
+
+  Diagnostics:
+    - GET /status\n`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

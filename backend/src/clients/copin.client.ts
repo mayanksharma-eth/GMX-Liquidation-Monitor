@@ -28,6 +28,7 @@ interface CopinClientConfig {
   apiSecret?: string;
   maxRetries?: number;
   retryDelay?: number;
+  defaultChain?: string;
 }
 
 export class CopinClient {
@@ -36,6 +37,7 @@ export class CopinClient {
   private apiSecret?: string;
   private maxRetries: number;
   private retryDelay: number;
+  private defaultChain?: string;
 
   constructor(config: CopinClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
@@ -43,6 +45,7 @@ export class CopinClient {
     this.apiSecret = config.apiSecret;
     this.maxRetries = config.maxRetries || 2;
     this.retryDelay = config.retryDelay || 1000; // 1 second
+    this.defaultChain = config.defaultChain;
   }
 
   /**
@@ -102,6 +105,29 @@ export class CopinClient {
       console.warn('Leaderboard fetch failed:', e instanceof Error ? e.message : 'Unknown error');
       return [];
     }
+  }
+
+  isConfigured(): boolean {
+    return Boolean(this.apiKey);
+  }
+
+  /**
+   * Lightweight availability check used by status endpoint
+   */
+  async ping(options: { protocol?: 'GMX' | 'GMX_V2'; chain?: string } = {}): Promise<void> {
+    const protocol = options.protocol || 'GMX';
+    const chain = options.chain || this.defaultChain;
+
+    if (!this.apiKey) {
+      throw new Error('Copin API key not configured');
+    }
+
+    await this.getTopTraders({
+      protocol,
+      timeframe: '7d',
+      limit: 1,
+      chain,
+    });
   }
 
   /**

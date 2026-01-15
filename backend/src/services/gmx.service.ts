@@ -70,6 +70,7 @@ export class GMXService {
 
       const sizeUsd = Number(size) / Number(USD_PRECISION);
       const collateralUsd = Number(collateral) / Number(USD_PRECISION);
+      const leverage = collateralUsd > 0 ? sizeUsd / collateralUsd : 0;
       const entryPrice = Number(averagePrice) / Number(PRICE_PRECISION);
       const markPriceNum = Number(markPrice) / Number(PRICE_PRECISION);
 
@@ -93,6 +94,7 @@ export class GMXService {
         isLong,
         sizeUsd,
         collateralUsd,
+        leverage,
         entryPrice,
         markPrice: markPriceNum,
         liquidationPrice,
@@ -110,6 +112,10 @@ export class GMXService {
     entryPrice: number,
     isLong: boolean
   ): number {
+    if (collateralUsd <= 0 || sizeUsd <= 0) {
+      return entryPrice;
+    }
+
     // GMX v1 liquidation logic (simplified):
     // Position is liquidated when: losses + fees >= collateral
     //
@@ -126,6 +132,10 @@ export class GMXService {
     //   => liqPrice = entryPrice + (collateral - fees) / leverage
 
     const leverage = sizeUsd / collateralUsd;
+    if (!isFinite(leverage) || leverage <= 0) {
+      return entryPrice;
+    }
+
     const liquidationFeeUsd = Math.max(5, collateralUsd * 0.005); // ~$5 or 0.5% of collateral
     const remainingCollateral = collateralUsd - liquidationFeeUsd;
 
@@ -145,6 +155,10 @@ export class GMXService {
     isLong: boolean
   ): number {
     // Calculate percentage distance to liquidation
+    if (markPrice <= 0) {
+      return 0;
+    }
+
     const distance = Math.abs(markPrice - liquidationPrice);
     const pct = (distance / markPrice) * 100;
     return Math.round(pct * 100) / 100; // Round to 2 decimals

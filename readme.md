@@ -4,6 +4,7 @@ A comprehensive system for monitoring GMX position liquidation risk on Arbitrum,
 - Individual wallet position monitoring (on-chain)
 - Top trader whale monitoring (via Copin Analyzer API)
 - Real-time liquidation risk assessment
+- Dashboard quality-of-life: watchlists, filters, auto-refresh, and whale-to-wallet jumps
 
 ## Features
 
@@ -15,11 +16,12 @@ A comprehensive system for monitoring GMX position liquidation risk on Arbitrum,
 - Risk classification (SAFE / WARNING / CRITICAL)
 - REST API backend with Fastify
 - Clean Next.js dashboard UI
+- Dashboard controls: watchlist persistence, risk/side/market filters, auto-refresh cadence, whale rows can be loaded into wallet checker
 - In-memory caching to avoid RPC/API spam
 
 ### Data Sources
 - **On-Chain**: Direct GMX v1 Vault contract reads via ethers v6
-- **Copin API**: Top traders and position data from Copin Analyzer
+- **Copin API**: Leaderboard + position filter with optional HMAC auth, plus statistics fallback when leaderboard is empty
 
 ## Architecture
 
@@ -63,7 +65,7 @@ GMX_Liquidation_Monitor/
 
 - Node.js 18+ and npm/yarn/pnpm
 - Arbitrum RPC URL (public or private like Alchemy/Infura)
-- Copin API key (optional, for whale monitoring)
+- Copin API key (and optional API secret for HMAC; required for whale monitoring)
 
 ## Quick Start
 
@@ -78,7 +80,9 @@ cp .env.example .env
 
 # Edit .env and configure:
 # - ARBITRUM_RPC_URL (required)
-# - COPIN_API_KEY (optional, for whale monitoring)
+# - COPIN_API_KEY (required for whale monitoring)
+# - COPIN_API_SECRET (optional HMAC signing, recommended if Copin requires it)
+# - COPIN_API_BASE_URL (optional override, defaults to https://api.copin.io)
 ```
 
 ### 2. Backend Setup
@@ -86,11 +90,11 @@ cp .env.example .env
 ```bash
 cd backend
 
-# Install dependencies (includes zod, p-limit)
+# Install dependencies (includes zod, p-limit) - or run `npm run install:all` from repo root
 npm install
 
 # Start development server
-npm run dev
+npm run dev   # or from repo root: npm run dev:backend
 ```
 
 Backend will run at `http://localhost:3001`
@@ -109,7 +113,7 @@ cp .env.local.example .env.local
 npm install
 
 # Start development server
-npm run dev
+npm run dev   # or from repo root: npm run dev:frontend
 ```
 
 Frontend will run at `http://localhost:3000`
@@ -119,6 +123,14 @@ Frontend will run at `http://localhost:3000`
 1. Open browser to `http://localhost:3000`
 2. **Wallet Checker**: Enter a wallet address to check individual positions
 3. **Whale Monitor**: Select timeframe/limit and click "Load Top Traders"
+
+## Dashboard Highlights
+
+- Saved watchlist stored locally for quick wallet lookups (including whale rows -> "Load wallet")
+- Auto-refresh toggle with 15/30/60/120s cadence plus manual refresh button
+- Filters for risk tier, side, and market search; top-risk heat cards and summary stats up top
+- API status + last sync indicator so you know when backend calls are healthy
+- Expandable whale table shows per-trader positions with risk badges and liquidation buffers
 
 ## API Endpoints
 
@@ -143,6 +155,7 @@ Fetch positions for a wallet address (on-chain reads).
     "isLong": true,
     "sizeUsd": 10000,
     "collateralUsd": 2000,
+    "leverage": 5,
     "entryPrice": 3500,
     "markPrice": 3400,
     "liquidationPrice": 3200,
@@ -162,6 +175,7 @@ Fetch positions with risk assessment (on-chain reads).
     "isLong": true,
     "sizeUsd": 10000,
     "collateralUsd": 2000,
+    "leverage": 5,
     "entryPrice": 3500,
     "markPrice": 3400,
     "liquidationPrice": 3200,
@@ -170,6 +184,55 @@ Fetch positions with risk assessment (on-chain reads).
     "riskExplanation": "WARNING: liquidates if ETH drops ~5.88%"
   }
 ]
+```
+
+#### `GET /risk/overview?account=0x...`
+Fetch risk positions plus a precomputed summary (best for dashboards).
+
+**Response:**
+```json
+{
+  "account": "0x...",
+  "updatedAt": "2025-12-19T10:30:00Z",
+  "positions": [
+    {
+      "market": "ETH-USD",
+      "isLong": true,
+      "sizeUsd": 10000,
+      "collateralUsd": 2000,
+      "leverage": 5,
+      "entryPrice": 3500,
+      "markPrice": 3400,
+      "liquidationPrice": 3200,
+      "liqDistancePct": 5.88,
+      "riskLevel": "WARNING",
+      "riskExplanation": "WARNING: liquidates if ETH drops ~5.88%"
+    }
+  ],
+  "summary": {
+    "positions": 1,
+    "atRisk": 1,
+    "critical": 0,
+    "totalSizeUsd": 10000,
+    "totalCollateralUsd": 2000,
+    "averageLeverage": 5,
+    "closestLiqDistancePct": 5.88,
+    "worstRisk": "WARNING"
+  }
+}
+```
+
+#### `GET /status`
+Diagnostic status for RPC + Copin integration (cached ~20s).
+
+**Response:**
+```json
+{
+  "ok": true,
+  "timestamp": "2025-12-19T10:30:00Z",
+  "rpc": { "ok": true, "chainId": 42161, "blockNumber": 21123456 },
+  "copin": { "ok": true, "enabled": true }
+}
 ```
 
 ### Whale Monitoring Endpoints (Copin API)
@@ -275,13 +338,14 @@ Both return the same normalized format, ensuring consistent risk assessment.
 **For whale monitoring only.** See [COPIN_SETUP.md](COPIN_SETUP.md) for detailed guide.
 
 **Key Features:**
+- Pre-wired to Copin leaderboard (`/leaderboards/page`) with fallback to statistics filter (`/public/:PROTOCOL/position/statistic/filter`) when snapshots are empty
+- Trader positions fetched via `/:PROTOCOL/position/filter`
+- Optional HMAC auth when `COPIN_API_KEY` + `COPIN_API_SECRET` are set (falls back to bearer/API-key headers if only key provided)
 - Zod schema validation for API responses
-- Automatic retry with exponential backoff
-- Concurrency limiting (max 5 parallel calls)
-- Separate caching: leaderboard (60s), positions (30s)
-- 429 rate limit handling
+- Automatic retry with exponential backoff + 429-aware rate limiting
+- Concurrency limiting (max 5 parallel calls) and caching: leaderboard (60s), positions (30s)
 
-**IMPORTANT:** Endpoint paths in code are **placeholders**. Update [backend/src/clients/copin.client.ts](backend/src/clients/copin.client.ts:14) with actual Copin API paths.
+**Adjust if needed:** If Copin exposes different paths on your plan, update `ENDPOINTS` in [backend/src/clients/copin.client.ts](backend/src/clients/copin.client.ts).
 
 ### Liquidation Calculation
 
@@ -334,11 +398,14 @@ ARBITRUM_RPC_URL=https://arb1.arbitrum.io/rpc
 # Optional
 PORT=3001
 
-# Whale Monitoring (optional)
+# Whale Monitoring (optional but required for whale endpoints)
 COPIN_API_BASE_URL=https://api.copin.io
 COPIN_API_KEY=your_api_key_here
+COPIN_API_SECRET=your_api_secret_here   # optional; enables HMAC signing if your plan requires it
 COPIN_CHAIN=arbitrum
 ```
+
+The backend also reads `API_KEY` / `API_SECRET` as fallbacks for Copin credentials.
 
 ### Frontend (`frontend/.env.local`)
 
@@ -350,17 +417,16 @@ NEXT_PUBLIC_API_URL=http://localhost:3001
 
 **Required Steps:**
 
-1. **Get Copin API Key**
+1. **Get Copin API credentials**
    - Sign up at Copin Analyzer
-   - Get API key from dashboard
+   - Grab API key (and API secret if your plan requires HMAC)
    - Add to `backend/.env`
 
-2. **Update Endpoint Paths**
-   - Get actual API endpoint paths from Copin docs
-   - Update `backend/src/clients/copin.client.ts` (line ~14)
-   - Replace placeholder paths with real ones
+2. **Confirm endpoints (optional)**
+   - Default paths use Copin `leaderboards/page`, `public/:PROTOCOL/position/statistic/filter`, and `/:PROTOCOL/position/filter`
+   - If your account uses different paths, update `ENDPOINTS` in `backend/src/clients/copin.client.ts`
 
-3. **Test Integration**
+3. **Test integration**
    ```bash
    curl "http://localhost:3001/top-traders?timeframe=7d&limit=10&protocol=GMX"
    ```
@@ -401,9 +467,9 @@ npm start
 - Verify you haven't exceeded Copin's rate limits
 
 **"Whale monitoring not working":**
-- Ensure `COPIN_API_KEY` is set in `backend/.env`
-- Update placeholder endpoint paths in `copin.client.ts`
-- Check Copin API status and documentation
+- Ensure `COPIN_API_KEY` (and `COPIN_API_SECRET` if needed) are set in `backend/.env`
+- Verify `COPIN_API_BASE_URL` and `ENDPOINTS` in `copin.client.ts` match your Copin plan
+- Check Copin API status and backend logs for rate limits/auth errors
 
 ## Upgrading from Original MVP
 
@@ -428,10 +494,10 @@ If you have the original version (before whale monitoring):
 - In-memory caching only
 
 ### Copin Integration
-- **Endpoint paths are placeholders** - must update with real paths
-- Liquidation price accuracy depends on Copin providing the field
-- API rate limits apply
-- No fallback to on-chain for whale monitoring (yet)
+- Whale endpoints require Copin API credentials; HMAC signing is supported if your plan requires it
+- Liquidation price accuracy depends on Copin providing the field; otherwise uses approximated calc
+- API rate limits apply; current concurrency limit is 5 with 30-60s caches
+- No fallback to on-chain for whale monitoring yet; GMX v2 support depends on Copin feed
 
 ## Future Enhancements
 

@@ -7,6 +7,7 @@ export interface NormalizedPosition {
   isLong: boolean;          // true for long, false for short
   sizeUsd: number;          // Position size in USD
   collateralUsd: number;    // Collateral in USD
+  leverage: number;         // Position leverage (size / collateral)
   entryPrice: number;       // Average entry price
   markPrice: number;        // Current mark/oracle price
   liquidationPrice: number; // Liquidation threshold price
